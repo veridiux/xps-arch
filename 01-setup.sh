@@ -1,10 +1,18 @@
 #!/bin/bash
-
 set -e
+
+# === ENV VARS ===
+BOOT_MODE=""
+INSTALL_DRIVE=""
+SWAP_SIZE=""
+HOME_MODE=""
+HOME_SIZE=""
+HOME_DRIVE=""
+ROOT_FS=""
+HOME_FS=""
 
 # === FUNCTIONS ===
 
-# Detect Boot Mode
 detect_boot_mode() {
     if [ -d /sys/firmware/efi ]; then
         echo "UEFI mode detected."
@@ -15,7 +23,6 @@ detect_boot_mode() {
     fi
 }
 
-# Detect Available Drives
 list_drives() {
     echo "Available drives:"
     lsblk -d -n -e 7,11 -o NAME,SIZE,MODEL | while read -r name size model; do
@@ -23,8 +30,7 @@ list_drives() {
     done
 }
 
-# Prompt for Drive Selection
-select_drive() {
+select_install_drive() {
     echo "Enter the drive to install Arch on (e.g., /dev/sda):"
     read -rp "> " INSTALL_DRIVE
     if [ ! -b "$INSTALL_DRIVE" ]; then
@@ -33,7 +39,6 @@ select_drive() {
     fi
 }
 
-# Prompt for /home Configuration
 configure_home_partition() {
     echo "Configure /home partition:"
     echo "1) Use remaining space on main drive"
@@ -42,18 +47,16 @@ configure_home_partition() {
     read -rp "Select option [1-3]: " HOME_OPTION
 
     case "$HOME_OPTION" in
-        1)
-            HOME_MODE="remaining"
-            ;;
+        1) HOME_MODE="remaining" ;;
         2)
             read -rp "Enter fixed size for /home (e.g., 20G): " HOME_SIZE
             HOME_MODE="fixed"
             ;;
         3)
-            echo "Looking for additional drives..."
+            echo "Looking for other drives..."
             OTHER_DRIVES=$(lsblk -d -n -e 7,11 -o NAME | grep -v "$(basename "$INSTALL_DRIVE")")
             if [ -z "$OTHER_DRIVES" ]; then
-                echo "No other drives found. Falling back to main drive with remaining space."
+                echo "No additional drives found. Defaulting to remaining space."
                 HOME_MODE="remaining"
             else
                 echo "Available secondary drives:"
@@ -62,54 +65,45 @@ configure_home_partition() {
                 done
                 read -rp "Select drive for /home (e.g., /dev/sdb): " HOME_DRIVE
                 if [ ! -b "$HOME_DRIVE" ]; then
-                    echo "Invalid secondary drive. Exiting."
+                    echo "Invalid drive."
                     exit 1
                 fi
                 HOME_MODE="other"
             fi
             ;;
-        *)
-            echo "Invalid option."
-            exit 1
-            ;;
+        *) echo "Invalid option."; exit 1 ;;
     esac
 }
 
-# Prompt for Swap Size
 configure_swap() {
     read -rp "Enter swap partition size (e.g., 2G): " SWAP_SIZE
     if [[ ! "$SWAP_SIZE" =~ ^[0-9]+[MG]$ ]]; then
-        echo "Invalid size format. Use number followed by M or G."
+        echo "Invalid swap size format. Use number + M or G."
         exit 1
     fi
 }
 
-# === MAIN ===
+select_filesystems() {
+    echo "Choose filesystem for root (/):"
+    select ROOT_FS in ext4 btrfs xfs; do [[ $ROOT_FS ]] && break; done
+
+    echo "Choose filesystem for /home:"
+    select HOME_FS in ext4 btrfs xfs; do [[ $HOME_FS ]] && break; done
+}
+
+# === MAIN EXECUTION ===
 clear
-echo "=== Arch Linux Install Script: Disk Setup Phase ==="
+echo "=== Arch Install: Setup Phase ==="
+
 detect_boot_mode
 echo
 list_drives
-echo
-select_drive
+select_install_drive
 echo
 configure_home_partition
-echo
 configure_swap
-
-# Summary
 echo
-echo "=== Summary ==="
-echo "Boot Mode      : $BOOT_MODE"
-echo "Install Drive  : $INSTALL_DRIVE"
-echo "Swap Size      : $SWAP_SIZE"
-if [ "$HOME_MODE" = "fixed" ]; then
-    echo "/home Mode     : Fixed size ($HOME_SIZE)"
-elif [ "$HOME_MODE" = "remaining" ]; then
-    echo "/home Mode     : Remaining space on $INSTALL_DRIVE"
-else
-    echo "/home Mode     : On separate drive $HOME_DRIVE"
-fi
+select_filesystems
 
-# Next phase would continue here (e.g., partitioning logic)...
-
+# Export all config for use in next script
+export BOOT_MODE INSTALL_DRIVE SWAP_SIZE HOME_MODE HOME_SIZE HOME_DRIVE ROOT_FS HOME_FS
